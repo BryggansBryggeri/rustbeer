@@ -1,22 +1,23 @@
+use async_nats::{Message, Subscription};
+use async_trait::async_trait;
 use crate::actor::Actor;
 use crate::pub_sub::{
     nats_client::decode_nats_data, nats_client::NatsClient, nats_client::NatsConfig, ClientId,
     ClientState, PubSubClient, PubSubError, PubSubMsg, Subject,
 };
 use crate::time::TimeStamp;
-use nats::{Message, Subscription};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 pub struct ActorClient {
     id: ClientId,
-    actor: Box<dyn Actor>,
+    actor: Box<dyn Actor + Sync>,
     /// TODO: Make generic over PubSubClient
     client: NatsClient,
 }
 
 impl ActorClient {
-    pub fn new(id: ClientId, actor: Box<dyn Actor>, config: &NatsConfig) -> Self {
-        let client = NatsClient::try_new(config).unwrap();
+    pub async fn new(id: ClientId, actor: Box<dyn Actor + Sync>, config: &NatsConfig) -> Self {
+        let client = NatsClient::try_new(config).await.unwrap();
         ActorClient { id, actor, client }
     }
 
@@ -62,12 +63,13 @@ impl Into<PubSubMsg> for ActorPubMsg {
     }
 }
 
+#[async_trait]
 impl PubSubClient for ActorClient {
-    fn client_loop(mut self) -> Result<(), PubSubError> {
-        let sub = self.subscribe(&Subject(format!("actor.{}.set_signal", self.id)))?;
+    async fn client_loop(mut self) -> Result<(), PubSubError> {
+        let sub = self.subscribe(&Subject(format!("actor.{}.set_signal", self.id))).await?;
         let mut state = ClientState::Active;
         while state == ClientState::Active {
-            if let Some(contr_message) = sub.next() {
+            if let Some(contr_message) = sub.next().await {
                 if let Ok(msg) = ActorSubMsg::try_from(contr_message) {
                     match msg {
                         ActorSubMsg::SetSignal(msg) => {
@@ -75,7 +77,7 @@ impl PubSubClient for ActorClient {
                                 self.publish(
                                     &self.gen_signal_subject(),
                                     &ActorPubMsg::CurrentSignal(msg).into(),
-                                )?;
+                                ).await?;
                             }
                         }
                         ActorSubMsg::Stop => state = ClientState::Inactive,
@@ -87,11 +89,11 @@ impl PubSubClient for ActorClient {
         Ok(())
     }
 
-    fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
-        self.client.subscribe(subject)
+    async fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
+        self.client.subscribe(subject).await
     }
 
-    fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
-        self.client.publish(subject, msg)
+    async fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
+        self.client.publish(subject, msg).await
     }
 }

@@ -1,9 +1,10 @@
+use async_trait::async_trait;
 use crate::pub_sub::{
     nats_client::decode_nats_data, nats_client::NatsClient, nats_client::NatsConfig, PubSubClient,
     PubSubError, PubSubMsg, Subject,
 };
+use async_nats::Subscription;
 use derive_more::{Display, From};
-use nats::Subscription;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -23,7 +24,7 @@ pub fn error<T: Into<LogMsg>, C: PubSubClient>(client: &C, msg: T, sub_subject: 
     log(client, msg, sub_subject, LogLevel::Error);
 }
 
-fn log<T: Into<LogMsg>, C: PubSubClient>(client: &C, msg: T, sub_subject: &str, level: LogLevel) {
+async fn log<T: Into<LogMsg>, C: PubSubClient>(client: &C, msg: T, sub_subject: &str, level: LogLevel) {
     let msg: LogMsg = msg.into();
     let subj = Subject(format!("{}.{}", level.main_subject(), sub_subject));
 
@@ -35,7 +36,7 @@ fn log<T: Into<LogMsg>, C: PubSubClient>(client: &C, msg: T, sub_subject: &str, 
         }
     };
     //.map_err(|err| PubSubError::MessageParse(err.to_string()))?,
-    match client.publish(&subj, &msg) {
+    match client.publish(&subj, &msg).await {
         Ok(_) => {}
         Err(err) => println!("Log error: {}", err.to_string()),
     };
@@ -47,8 +48,8 @@ pub struct Log {
 }
 
 impl Log {
-    pub fn new(config: &NatsConfig, level: LogLevel) -> Self {
-        let client = NatsClient::try_new(config).unwrap();
+    pub async fn new(config: &NatsConfig, level: LogLevel) -> Self {
+        let client = NatsClient::try_new(config).await.unwrap();
         Log { level, client }
     }
 
@@ -94,11 +95,12 @@ struct ExtComm {
     cmd: String,
 }
 
+#[async_trait]
 impl PubSubClient for Log {
-    fn client_loop(self) -> Result<(), PubSubError> {
-        let log_sub = self.subscribe(&Subject(String::from("log.>")))?;
+    async fn client_loop(self) -> Result<(), PubSubError> {
+        let log_sub = self.subscribe(&Subject(String::from("log.>"))).await?;
         loop {
-            if let Some(msg) = log_sub.next() {
+            if let Some(msg) = log_sub.next().await {
                 match LogLevel::from_msg_subject(&msg.subject) {
                     Ok(log_level) => match decode_nats_data::<LogMsg>(&msg.data) {
                         Ok(msg) => self.log(&msg.0, log_level),
@@ -110,12 +112,12 @@ impl PubSubClient for Log {
         }
     }
 
-    fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
-        self.client.subscribe(subject)
+    async fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
+        self.client.subscribe(subject).await
     }
 
-    fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
-        self.client.publish(subject, msg)
+    async fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
+        self.client.publish(subject, msg).await
     }
 }
 

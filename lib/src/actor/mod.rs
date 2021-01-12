@@ -29,7 +29,7 @@ pub struct ActorConfig {
 }
 
 impl ActorConfig {
-    pub fn get_actor(&self) -> Result<Box<dyn Actor>, ActorError> {
+    pub fn get_actor(&self) -> Result<Box<dyn Actor + Sync>, ActorError> {
         match &self.type_ {
             ActorType::SimpleGpio(pin_number) => {
                 let gpio_pin = hardware_impl::get_gpio_pin(*pin_number, &self.id.as_ref()).unwrap();

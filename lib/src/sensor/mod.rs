@@ -35,7 +35,7 @@ pub struct SensorConfig {
 }
 
 impl SensorConfig {
-    pub fn get_sensor(&self) -> Result<Box<dyn Sensor>, SensorError> {
+    pub fn get_sensor(&self) -> Result<Box<dyn Sensor + Sync>, SensorError> {
         match &self.type_ {
             SensorType::Dummy(delay_in_ms) => {
                 let sensor = dummy::Sensor::new(self.id.as_ref(), *delay_in_ms);

@@ -4,20 +4,22 @@ use crate::pub_sub::{
     nats_client::decode_nats_data, ClientId, ClientState, PubSubClient, PubSubError, Subject,
 };
 use crate::supervisor::{ActiveClientsList, Supervisor};
-use nats::{Message, Subscription};
+use async_nats::{Message, Subscription};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use async_trait::async_trait;
 pub(crate) const SUPERVISOR_SUBJECT: &str = "supervisor";
 
+#[async_trait]
 impl PubSubClient for Supervisor {
-    fn client_loop(mut self) -> Result<(), PubSubError> {
+    async fn client_loop(mut self) -> Result<(), PubSubError> {
         let subject = Subject("command.>".into());
-        let sub = self.subscribe(&subject)?;
+        let sub = self.subscribe(&subject).await?;
         let mut state = ClientState::Active;
         while state == ClientState::Active {
-            if let Some(msg) = sub.next() {
+            if let Some(msg) = sub.next().await {
                 state = match SupervisorSubMsg::try_from(&msg) {
-                    Ok(cmd) => match self.process_command(cmd, &msg) {
+                    Ok(cmd) => match self.process_command(cmd, &msg).await {
                         Ok(state) => state,
                         Err(err) => self.handle_err(err),
                     },
@@ -28,12 +30,12 @@ impl PubSubClient for Supervisor {
         Ok(())
     }
 
-    fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
-        self.client.subscribe(subject)
+    async fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
+        self.client.subscribe(subject).await
     }
 
-    fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
-        self.client.publish(subject, msg)
+    async fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
+        self.client.publish(subject, msg).await
     }
 }
 

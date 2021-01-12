@@ -17,7 +17,7 @@ use crate::pub_sub::{
 use crate::sensor::{SensorClient, SensorConfig, SensorError};
 use crate::supervisor::pub_sub::{SupervisorPubMsg, SupervisorSubMsg};
 use crate::time::TimeStamp;
-use nats::Message;
+use async_nats::Message;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,45 +35,44 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    pub fn init_from_config(config: config::Config) -> Result<Supervisor, SupervisorError> {
-        let client = NatsClient::try_new(&config.nats).unwrap();
+    pub async fn init_from_config(config: config::Config) -> Result<Supervisor, SupervisorError> {
+        let client = NatsClient::try_new(&config.nats).await.unwrap();
         let mut supervisor = Supervisor {
             client,
             config: config.clone(),
             active_clients: ActiveClients::new(),
         };
 
-        supervisor.add_logger(&config)?;
+        supervisor.add_logger(&config).await?;
 
         for sensor_config in config.hardware.sensors {
-            supervisor.add_sensor(sensor_config, &config.nats)?;
+            supervisor.add_sensor(sensor_config, &config.nats).await?;
         }
 
         for actor_config in config.hardware.actors {
-            supervisor.add_actor(actor_config, &config.nats)?;
+            supervisor.add_actor(actor_config, &config.nats).await?;
         }
 
         info(&supervisor, String::from("Supervisor ready"), "supervisor");
         Ok(supervisor)
     }
 
-    fn process_command(
+    async fn process_command(
         &mut self,
         cmd: SupervisorSubMsg,
         full_msg: &Message,
     ) -> Result<ClientState, SupervisorError> {
         match cmd {
             SupervisorSubMsg::StartController { control_config } => {
-                self.start_controller(control_config, 0.0)?;
+                self.start_controller(control_config, 0.0).await?;
                 Ok(ClientState::Active)
             }
             SupervisorSubMsg::SwitchController { control_config } => {
                 info(
                     self,
                     format!("Switching controller to type: {:?}", control_config.type_),
-                    "supervisor",
-                );
-                self.switch_controller(control_config, full_msg)?;
+                    "supervisor",);
+                self.switch_controller(control_config, full_msg).await?;
                 Ok(ClientState::Active)
             }
             SupervisorSubMsg::ListActiveClients => {
@@ -84,7 +83,7 @@ impl Supervisor {
         }
     }
 
-    fn start_controller(
+    async fn start_controller(
         &mut self,
         contr_config: ControllerConfig,
         target: f32,
@@ -107,7 +106,7 @@ impl Supervisor {
                     contr_config.type_.clone(),
                 );
                 let control_handle =
-                    thread::spawn(|| controller_client.client_loop().map_err(|err| err.into()));
+                    thread::spawn(|| controller_client.client_loop().await.map_err(|err| err.into()));
                 self.active_clients.controllers.insert(
                     contr_config.controller_id.clone(),
                     (control_handle, contr_config),
@@ -117,14 +116,14 @@ impl Supervisor {
         }
     }
 
-    fn switch_controller(
+    async fn switch_controller(
         &mut self,
         config: ControllerConfig,
         msg: &Message,
     ) -> Result<(), SupervisorError> {
         let contr_id = &config.controller_id;
-        let target: f32 = self.kill_client(contr_id)?;
-        self.start_controller(config.clone(), target)?;
+        let target: f32 = self.kill_client(contr_id).await?;
+        self.start_controller(config.clone(), target).await?;
         let status: PubSubMsg = ControllerPubMsg::Status {
             id: contr_id.clone(),
             timestamp: TimeStamp::now(),
@@ -133,25 +132,25 @@ impl Supervisor {
         }
         .into();
         Ok(msg
-            .respond(status.to_string())
+            .respond(status.to_string()).await
             .map_err(|err| PubSubError::Reply {
-                msg: msg.to_string(),
+                msg: String::from("Todo msg"), //msg.to_string(),
                 err: err.to_string(),
             })?)
     }
 
-    fn reply_active_clients(&self, msg: &Message) -> Result<(), PubSubError> {
+    async fn reply_active_clients(&self, msg: &Message) -> Result<(), PubSubError> {
         debug(self, String::from("Listing active clients"), "supervisor");
         let clients: PubSubMsg =
             SupervisorPubMsg::ActiveClients((&self.active_clients).into()).into();
-        msg.respond(clients.to_string())
+        msg.respond(clients.to_string()).await
             .map_err(|err| PubSubError::Reply {
-                msg: msg.to_string(),
+                msg: String::from("Todo msg"), //msg.to_string(),
                 err: err.to_string(),
             })
     }
 
-    fn kill_client<T: DeserializeOwned>(&mut self, id: &ClientId) -> Result<T, SupervisorError> {
+    async fn kill_client<T: DeserializeOwned>(&mut self, id: &ClientId) -> Result<T, SupervisorError> {
         // TODO: NOn-generic hack.
         let (handle, _config) = match self.active_clients.controllers.remove(id) {
             Some(contr) => Ok(contr),
@@ -160,7 +159,7 @@ impl Supervisor {
         let msg = SupervisorPubMsg::KillClient {
             client_id: id.clone(),
         };
-        let report = self.client.request(&msg.subject(), &msg.into())?;
+        let report = self.client.request(&msg.subject(), &msg.into()).await?;
         match handle.join() {
             Ok(_) => {}
             Err(_) => {
@@ -170,13 +169,13 @@ impl Supervisor {
         Ok(decode_nats_data::<T>(&report.data)?)
     }
 
-    fn add_logger(&mut self, config: &config::Config) -> Result<(), SupervisorError> {
+    async fn add_logger(&mut self, config: &config::Config) -> Result<(), SupervisorError> {
         let log = Log::new(&config.nats, config.general.log_level);
         let log_handle = thread::spawn(|| log.client_loop().map_err(|err| err.into()));
-        self.add_misc_client(ClientId("log".into()), log_handle)
+        self.add_misc_client(ClientId("log".into()), log_handle).await
     }
 
-    fn add_sensor(
+    async fn add_sensor(
         &mut self,
         sensor_config: SensorConfig,
         config: &NatsConfig,
@@ -199,7 +198,7 @@ impl Supervisor {
         }
     }
 
-    fn add_actor(
+    async fn add_actor(
         &mut self,
         actor_config: ActorConfig,
         config: &NatsConfig,
@@ -226,7 +225,7 @@ impl Supervisor {
         }
     }
 
-    fn add_misc_client(
+    async fn add_misc_client(
         &mut self,
         new_client: ClientId,
         handle: Handle,

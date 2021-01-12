@@ -1,5 +1,5 @@
 use crate::pub_sub::{PubSubError, PubSubMsg, Subject};
-use nats::{Connection, Options, Subscription};
+use async_nats::{Connection, Message, Options, Subscription};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::any::type_name;
 use std::path::PathBuf;
@@ -51,32 +51,28 @@ pub(crate) fn decode_nats_data<T: DeserializeOwned>(data: &[u8]) -> Result<T, Pu
 pub struct NatsClient(Connection);
 
 impl NatsClient {
-    pub fn try_new(config: &NatsConfig) -> Result<NatsClient, PubSubError> {
+    pub async fn try_new(config: &NatsConfig) -> Result<NatsClient, PubSubError> {
         let opts = Options::with_user_pass(&config.user, &config.pass);
-        match opts.connect(&config.server) {
+        match opts.connect(&config.server).await {
             Ok(nc) => Ok(NatsClient(nc)),
             Err(err) => Err(PubSubError::Generic(err.to_string())),
         }
     }
-    pub fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
+    pub async fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
         self.0
-            .subscribe(&subject.0)
+            .subscribe(&subject.0).await
             .map_err(|err| PubSubError::Subscription(err.to_string()))
     }
 
-    pub fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
+    pub async fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
         self.0
-            .publish(&subject.0, &msg.0)
+            .publish(&subject.0, &msg.0).await
             .map_err(|err| PubSubError::Publish(err.to_string()))
     }
 
-    pub fn request(
-        &self,
-        subject: &Subject,
-        msg: &PubSubMsg,
-    ) -> Result<nats::Message, PubSubError> {
+    pub async fn request(&self, subject: &Subject, msg: &PubSubMsg) -> Result<Message, PubSubError> {
         self.0
-            .request(&subject.0, &msg.0)
+            .request(&subject.0, &msg.0).await
             .map_err(|err| PubSubError::Publish(err.to_string()))
     }
 }

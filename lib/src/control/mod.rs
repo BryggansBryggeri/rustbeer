@@ -57,7 +57,7 @@ impl ControllerConfig {
         std::iter::once(&self.actor_id).chain(std::iter::once(&self.sensor_id))
     }
 
-    pub fn get_controller(&self, target: f32) -> Result<Box<dyn Control>, ControllerError> {
+    pub fn get_controller(&self, target: f32) -> Result<Box<dyn Control + Sync>, ControllerError> {
         match self.type_ {
             ControllerType::Hysteresis {
                 offset_on,

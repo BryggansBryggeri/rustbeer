@@ -9,7 +9,8 @@ use crate::pub_sub::{
 use crate::sensor::SensorMsg;
 use crate::supervisor::pub_sub::SupervisorPubMsg;
 use crate::time::TimeStamp;
-use nats::{Message, Subscription};
+use async_nats::{Message, Subscription};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -17,21 +18,21 @@ pub struct ControllerClient {
     id: ClientId,
     actor_id: ClientId,
     sensor_id: ClientId,
-    controller: Box<dyn Control>,
+    controller: Box<dyn Control + Sync>,
     client: NatsClient,
     type_: ControllerType,
 }
 
 impl ControllerClient {
-    pub fn new(
+    pub async fn new(
         id: ClientId,
         actor_id: ClientId,
         sensor_id: ClientId,
-        controller: Box<dyn Control>,
+        controller: Box<dyn Control + Sync>,
         config: &NatsConfig,
         type_: ControllerType,
     ) -> Self {
-        let client = NatsClient::try_new(config).unwrap();
+        let client = NatsClient::try_new(config).await.unwrap();
         ControllerClient {
             id,
             actor_id,
@@ -42,14 +43,14 @@ impl ControllerClient {
         }
     }
 
-    fn status_update(&self) {
+    async fn status_update(&self) {
         let status_update = ControllerPubMsg::Status {
             id: self.id.clone(),
             timestamp: TimeStamp::now(),
             target: self.controller.get_target(),
             type_: self.type_.clone(),
         };
-        if let Err(err) = self.publish(&status_update.subject(&self.id), &status_update.into()) {
+        if let Err(err) = self.publish(&status_update.subject(&self.id), &status_update.into()).await {
             log_error(
                 &self,
                 &format!("Could not publish status update: {}", err.to_string()),
@@ -58,16 +59,17 @@ impl ControllerClient {
     }
 }
 
+#[async_trait]
 impl PubSubClient for ControllerClient {
-    fn client_loop(mut self) -> Result<(), PubSubError> {
+    async fn client_loop(mut self) -> Result<(), PubSubError> {
         let kill_cmd = self.subscribe(
             &SupervisorPubMsg::KillClient {
                 client_id: self.id.clone(),
             }
             .subject(),
-        )?;
-        let controller = self.subscribe(&ControllerSubMsg::subject(&self.id))?;
-        let sensor = self.subscribe(&SensorMsg::subject(&self.sensor_id))?;
+        ).await?;
+        let controller = self.subscribe(&ControllerSubMsg::subject(&self.id)).await?;
+        let sensor = self.subscribe(&SensorMsg::subject(&self.sensor_id)).await?;
         let mut state = State::Active;
         log_info(
             &self,
@@ -75,17 +77,17 @@ impl PubSubClient for ControllerClient {
         );
         self.status_update();
         while state == State::Active {
-            if let Some(msg) = kill_cmd.try_next() {
+            if let Some(msg) = kill_cmd.next().await {
                 // TODO: Proper Status PubMsg.
                 log_info(&self, "killing contr. client");
-                msg.respond(format!("{}", self.controller.get_target()))
+                msg.respond(format!("{}", self.controller.get_target())).await
                     .map_err(|err| {
                         PubSubError::Client(format!("could not respond: '{}'.", err.to_string()))
                     })?;
                 state = State::Inactive;
             }
 
-            if let Some(msg) = controller.try_next() {
+            if let Some(msg) = controller.next().await {
                 // TODO: Match and log error
                 match ControllerSubMsg::try_from(msg) {
                     Ok(msg) => match msg {
@@ -99,7 +101,7 @@ impl PubSubClient for ControllerClient {
 
             self.status_update();
 
-            if let Some(meas_msg) = sensor.next() {
+            if let Some(meas_msg) = sensor.next().await {
                 if let Ok(msg) = SensorMsg::try_from(meas_msg) {
                     self.controller.calculate_signal(msg.meas.ok());
                 }
@@ -108,18 +110,18 @@ impl PubSubClient for ControllerClient {
                     timestamp: TimeStamp::now(),
                     signal: self.controller.get_control_signal(),
                 });
-                self.publish(&msg.subject(&self.actor_id), &msg.into())?;
+                self.publish(&msg.subject(&self.actor_id), &msg.into()).await?;
             }
         }
         Ok(())
     }
 
-    fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
-        self.client.subscribe(subject)
+    async fn subscribe(&self, subject: &Subject) -> Result<Subscription, PubSubError> {
+        self.client.subscribe(subject).await
     }
 
-    fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
-        self.client.publish(subject, msg)
+    async fn publish(&self, subject: &Subject, msg: &PubSubMsg) -> Result<(), PubSubError> {
+        self.client.publish(subject, msg).await
     }
 }
 
