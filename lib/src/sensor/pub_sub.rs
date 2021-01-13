@@ -59,7 +59,7 @@ impl PubSubClient for SensorClient {
         let supervisor = self.subscribe(&Subject(format!("command.sensor.{}", self.id))).await?;
         let meas_sub = self.meas_subject();
         loop {
-            for _msg in supervisor.next().await {
+            if let Some(_msg) = supervisor.next().await {
                 // Deal with supervisor command
             }
             let meas = self.sensor.get_measurement();
