@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 bryggio-lib = { path = "../lib" }
+tokio = { version = "1", features = ["full"] }

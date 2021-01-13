@@ -15,7 +15,8 @@ fn config_file_from_args() -> Result<PathBuf, SupervisorError> {
     }
 }
 
-fn main() -> Result<(), SupervisorError> {
+#[tokio::main]
+async fn main() -> Result<(), SupervisorError> {
     let config_file = config_file_from_args()?;
     let config = match config::Config::try_new(&config_file) {
         Ok(config) => config,
@@ -31,8 +32,8 @@ fn main() -> Result<(), SupervisorError> {
     println!("Starting nats");
     let mut nats_server_child = run_nats_server(&config.nats)?;
     println!("Starting supervisor");
-    let supervisor = Supervisor::init_from_config(config)?;
-    supervisor.client_loop()?;
+    let supervisor = Supervisor::init_from_config(config).await?;
+    supervisor.client_loop().await?;
     nats_server_child
         .kill()
         .map_err(|err| PubSubError::Server(err.to_string()).into())

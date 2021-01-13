@@ -8,10 +8,10 @@ use bryggio_lib::{
 use log::info;
 use structopt::StructOpt;
 
-fn run_subcommand(opt: Opt) {
+async fn run_subcommand(opt: Opt) {
     match opt {
         Opt::Brewery(command) => {
-            brewery::process_command(&command);
+            brewery::process_command(&command).await;
         }
         Opt::Install(target) => match target {
             InstallTarget::Server(opt) => install::server::install_server(&opt),
@@ -28,7 +28,7 @@ fn run_subcommand(opt: Opt) {
                     err
                 )
             });
-            let client = NatsClient::try_new(&config.nats).unwrap_or_else(|err| {
+            let client = NatsClient::try_new(&config.nats).await.unwrap_or_else(|err| {
                 panic!(
                     "Error connecting to NATS server:\n{:?}\n{}",
                     &config.nats, err
@@ -43,6 +43,7 @@ fn run_subcommand(opt: Opt) {
                     &start_controller_msg.subject(),
                     &start_controller_msg.into(),
                 )
+                .await
                 .unwrap_or_else(|err| panic!("Error publishing: '{}'", err));
             println!("Sleep to make sure the controller gets started");
             let switch_controller_msg = SupervisorSubMsg::SwitchController {
@@ -55,13 +56,15 @@ fn run_subcommand(opt: Opt) {
                     &switch_controller_msg.subject(),
                     &switch_controller_msg.into(),
                 )
+                .await
                 .expect("Request error");
         }
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let opt = Opt::from_args();
     bryggio_cli::init_logging(&opt);
-    run_subcommand(opt)
+    run_subcommand(opt).await
 }
