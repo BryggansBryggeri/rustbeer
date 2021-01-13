@@ -10,8 +10,11 @@ use structopt::StructOpt;
 
 async fn run_subcommand(opt: Opt) {
     match opt {
-        Opt::Brewery(command) => {
-            brewery::process_command(&command).await;
+        Opt::Publish(opts) => {
+            brewery::publish_command(&opts).await;
+        }
+        Opt::Request(opts) => {
+            brewery::request(&opts).await;
         }
         Opt::Install(target) => match target {
             InstallTarget::Server(opt) => install::server::install_server(&opt),

@@ -74,6 +74,7 @@ impl Supervisor {
             }
             SupervisorSubMsg::ListActiveClients => {
                 if let Err(err) = self.reply_active_clients(&full_msg).await {
+                    full_msg.respond(format!("Error replying with active clients. {}", err)).await?;
                     error(
                         self,
                         format!("Failed replying with active clients. {}", err),
@@ -278,9 +279,9 @@ impl ActiveClients {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ActiveClientsList {
-    sensors: Vec<(ClientId, SensorConfig)>,
-    actors: Vec<(ClientId, ActorConfig)>,
-    controllers: Vec<(ClientId, ControllerConfig)>,
+    sensors: HashMap<ClientId, SensorConfig>,
+    actors: HashMap<ClientId, ActorConfig>,
+    controllers: HashMap<ClientId, ControllerConfig>,
     misc: Vec<ClientId>,
 }
 
@@ -307,10 +308,12 @@ impl From<&ActiveClients> for ActiveClientsList {
     }
 }
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum SupervisorError {
     #[error("This should be its own error: {0}")]
     Cli(String),
+    #[error("'{0}' is not an active client")]
+    Io(#[from] std::io::Error),
     #[error("'{0}' is not an active client")]
     Missing(ClientId),
     #[error("'{0}' is already an active client")]
