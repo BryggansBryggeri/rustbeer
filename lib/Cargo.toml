@@ -21,6 +21,7 @@ async-nats = ">=0.9"
 async-trait = ">=0.1"
 derive_more = ">=0.99"
 thiserror = "1.0.22"
+futures = ">=0.3"
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 linux-embedded-hal = {git = "https://github.com/rust-embedded/linux-embedded-hal", rev="25bf2be", features=["gpio_cdev"]}

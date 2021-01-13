@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
 use thiserror::Error;
+use futures::executor::block_on;
 
 pub mod pub_sub;
 
@@ -104,9 +105,9 @@ impl Supervisor {
                     contr_config.get_controller(target)?,
                     &self.config.nats,
                     contr_config.type_.clone(),
-                );
+                ).await;
                 let control_handle =
-                    thread::spawn(|| controller_client.client_loop().await.map_err(|err| err.into()));
+                    thread::spawn(|| block_on(controller_client.client_loop()).map_err(|err| err.into()));
                 self.active_clients.controllers.insert(
                     contr_config.controller_id.clone(),
                     (control_handle, contr_config),
@@ -170,8 +171,10 @@ impl Supervisor {
     }
 
     async fn add_logger(&mut self, config: &config::Config) -> Result<(), SupervisorError> {
-        let log = Log::new(&config.nats, config.general.log_level);
-        let log_handle = thread::spawn(|| log.client_loop().map_err(|err| err.into()));
+        let log = Log::new(&config.nats, config.general.log_level).await;
+        let log_handle = thread::spawn(|| {
+            block_on(log.client_loop()).map_err(|err| err.into())
+        });
         self.add_misc_client(ClientId("log".into()), log_handle).await
     }
 
@@ -188,8 +191,8 @@ impl Supervisor {
                     sensor_config.id.clone(),
                     sensor_config.get_sensor()?,
                     config,
-                );
-                let handle = thread::spawn(|| sensor.client_loop().map_err(|err| err.into()));
+                ).await;
+                let handle = thread::spawn(|| block_on(sensor.client_loop()).map_err(|err| err.into()));
                 self.active_clients
                     .sensors
                     .insert(id.clone(), (handle, sensor_config));
@@ -207,8 +210,8 @@ impl Supervisor {
         match self.active_clients.actors.get(id) {
             Some(_) => Err(SupervisorError::AlreadyActive(id.clone())),
             None => {
-                let actor = ActorClient::new(id.clone(), actor_config.get_actor()?, config);
-                let handle = thread::spawn(|| actor.client_loop().map_err(|err| err.into()));
+                let actor = ActorClient::new(id.clone(), actor_config.get_actor()?, config).await;
+                let handle = thread::spawn(|| block_on(actor.client_loop()).map_err(|err| err.into()));
                 self.active_clients
                     .actors
                     .insert(id.clone(), (handle, actor_config));
