@@ -1,5 +1,5 @@
 use crate::wifi_settings::{Password, Ssid};
-use std::path;
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -37,7 +37,7 @@ impl Opt {
 #[derive(Debug, StructOpt)]
 pub struct PubSubOpt {
     #[structopt(long)]
-    pub config: path::PathBuf,
+    pub config: PathBuf,
     #[structopt(long)]
     pub(crate) topic: String,
     #[structopt(long)]
@@ -48,9 +48,9 @@ pub struct PubSubOpt {
 
 #[derive(Debug, StructOpt)]
 pub enum InstallTarget {
-    /// Install `bryggio-server`
-    #[structopt(name = "bryggio-server")]
-    Server(ServerOpt),
+    /// Install `bryggio-supervisor`
+    #[structopt(name = "bryggio-supervisor")]
+    Supervisor(SupervisorOpt),
     /// Install `bryggio-cli`
     #[structopt(name = "bryggio-cli")]
     Cli(CliOpt),
@@ -59,7 +59,7 @@ pub enum InstallTarget {
 impl InstallTarget {
     fn verbose(&self) -> bool {
         match self {
-            Self::Server(opt) => opt.common.verbose,
+            Self::Supervisor(opt) => opt.common.verbose,
             Self::Cli(opt) => opt.common.verbose,
         }
     }
@@ -72,11 +72,15 @@ pub struct CliOpt {
 }
 
 #[derive(Debug, StructOpt)]
-pub struct ServerOpt {
+pub struct SupervisorOpt {
     #[structopt(flatten)]
     common: Common,
     #[structopt(long)]
     pub update: bool,
+    #[structopt(default_value = "target/nats-server", long)]
+    pub nats_path: PathBuf,
+    #[structopt(default_value = "target/gh_supervisor", long)]
+    pub supervisor_path: PathBuf,
 }
 
 #[derive(Debug, StructOpt)]

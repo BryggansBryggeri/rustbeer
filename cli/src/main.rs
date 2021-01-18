@@ -17,7 +17,7 @@ async fn run_subcommand(opt: Opt) {
             brewery::request(&opts).await;
         }
         Opt::Install(target) => match target {
-            InstallTarget::Server(opt) => install::server::install_server(&opt),
+            InstallTarget::Supervisor(opt) => install::supervisor::install_supervisor(&opt),
             InstallTarget::Cli(_opt) => info!("Installing `bryggio-cli`"),
         },
         Opt::RbPiSetup(opt) => {
