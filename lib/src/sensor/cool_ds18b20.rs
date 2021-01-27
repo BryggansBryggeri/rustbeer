@@ -2,71 +2,74 @@
 ///
 /// [Datasheet](https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf)
 ///
-/// Wraps the [onewire](https://crates.io/crates/onewire) implementation
-use crate::sensor;
+use core::fmt::{Debug, Write};
+use ds18b20::{Ds18b20, Resolution, SensorData};
 use embedded_hal::blocking::delay::{DelayMs, DelayUs};
-use onewire as ext_ds18;
+use embedded_hal::digital::v2::{InputPin, OutputPin};
+use one_wire_bus::{OneWire, OneWireResult};
+use std::collections::HashMap;
 
-pub struct Ds18b20<G, D>
+pub fn find_devices<P, E>(delay: &mut impl DelayUs<u16>, tx: &mut impl Write, one_wire_pin: P)
 where
-    G: ext_ds18::OpenDrainOutput<sensor::Error> + Send,
-    D: DelayMs<u16> + DelayUs<u16> + Send,
+    P: OutputPin<Error = E> + InputPin<Error = E>,
+    E: Debug,
 {
-    pub id: String,
-    ds18: ext_ds18::DS18B20,
-    gpio: G,
-    delay: D,
-}
+    let mut one_wire_bus = OneWire::new(one_wire_pin).unwrap();
+    for device_address in one_wire_bus.devices(false, delay) {
+        // The search could fail at any time, so check each result. The iterator automatically
+        // ends after an error.
+        let device_address = device_address.unwrap();
 
-impl<G, D> Ds18b20<G, D>
-where
-    G: ext_ds18::OpenDrainOutput<sensor::Error> + Send,
-    D: DelayMs<u16> + DelayUs<u16> + Send,
-{
-    pub fn new(id: &str, gpio: G, delay: D) -> Ds18b20<G, D> {
-        let device = ext_ds18::Device::from_str("Dummy address").expect("This will panic");
-        let ds18b20 = ext_ds18::DS18B20::new::<sensor::Error>(device).unwrap();
-        Ds18b20 {
-            id: id.into(),
-            ds18: ds18b20,
-            gpio,
-            delay,
-        }
+        // The family code can be used to identify the type of device
+        // If supported, another crate can be used to interact with that device at the given address
+        writeln!(
+            tx,
+            "Found device at address {:?} with family code: {:#x?}",
+            device_address,
+            device_address.family_code()
+        )
+        .unwrap();
     }
 }
 
-impl<G, D> sensor::Sensor for Ds18b20<G, D>
+pub fn get_temperature<P, E>(
+    delay: &mut (impl DelayUs<u16> + DelayMs<u16>),
+    one_wire_bus: &mut OneWire<P>,
+) -> OneWireResult<HashMap<u64, SensorData>, E>
 where
-    G: ext_ds18::OpenDrainOutput<sensor::Error> + Send,
-    D: DelayMs<u16> + DelayUs<u16> + Send,
+    P: OutputPin<Error = E> + InputPin<Error = E>,
+    E: Debug,
 {
-    fn get_id(&self) -> String {
-        self.id.clone()
-    }
+    // initiate a temperature measurement for all connected devices
+    ds18b20::start_simultaneous_temp_measurement(one_wire_bus, delay)?;
 
-    fn get_measurement(&mut self) -> Result<f32, sensor::Error> {
-        // TODO: Not nice to recreate wire every time?
-        // but have not found any way to add a ref to it to self.
-        let mut wire = ext_ds18::OneWire::new(&mut self.gpio, false);
-        if wire.reset(&mut self.delay).is_err() {
-            panic!("Missing pullup or error on line");
-        };
-        // request sensor to measure temperature
-        let resolution = self
-            .ds18
-            .measure_temperature(&mut wire, &mut self.delay)
-            .unwrap();
-        // wait for compeltion, depends on resolution
-        self.delay.delay_ms(resolution.time_ms());
-        // read temperature
-        match self.ds18.read_temperature(&mut wire, &mut self.delay) {
-            Ok(temp) => {
-                let (integer, decimal) = ext_ds18::ds18b20::split_temp(temp);
-                Ok(int_tuple_to_float(integer, decimal))
-            }
-            Err(_err) => todo!("Better error for underlying error",),
+    // wait until the measurement is done. This depends on the resolution you specified
+    // If you don't know the resolution, you can obtain it from reading the sensor data,
+    // or just wait the longest time, which is the 12-bit resolution (750ms)
+    Resolution::Bits12.delay_for_measurement_time(delay);
+
+    // TODO: no_std?
+    let mut measurements = HashMap::new();
+
+    // iterate over all the devices, and report their temperature
+    let mut search_state = None;
+    while let Some((device_address, state)) =
+        one_wire_bus.device_search(search_state.as_ref(), false, delay)?
+    {
+        search_state = Some(state);
+        if device_address.family_code() != ds18b20::FAMILY_CODE {
+            // skip other devices
+            continue;
         }
+        // You will generally create the sensor once, and save it for later
+        let sensor = Ds18b20::new(device_address)?;
+
+        // contains the read temperature, as well as config info such as the resolution used
+        let sensor_data = sensor.read_data(one_wire_bus, delay)?;
+        // TODO: Impl Hash for device address.
+        measurements.insert(device_address.0, sensor_data);
     }
+    Ok(measurements)
 }
 
 fn int_tuple_to_float(integer: i16, decimal: i16) -> f32 {

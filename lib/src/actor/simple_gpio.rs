@@ -1,5 +1,5 @@
 use crate::actor::{Actor, ActorError};
-use embedded_hal::digital::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 
 pub struct SimpleGpioActor<T: OutputPin + Send> {
     pub id: String,
@@ -32,11 +32,11 @@ impl<T: OutputPin + Send> Actor for SimpleGpioActor<T> {
         self.validate_signal(signal)?;
         if signal > 0.0 {
             self.handle
-                .try_set_high()
+                .set_high()
                 .map_err(|_err| ActorError::Generic(String::from("GPIO error when setting high")))
         } else {
             self.handle
-                .try_set_low()
+                .set_low()
                 .map_err(|_err| ActorError::Generic(String::from("GPIO error when setting high")))
         }
     }

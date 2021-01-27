@@ -35,7 +35,8 @@ script = [
 description = "scp supervisor to RbPi (armv7-target)"
 dependencies = ["rbpi-build"]
 script = [
-  "scp target/armv7-unknown-linux-gnueabihf/debug/bryggio-supervisor target/rbpi-nats-server pi_louron:~/bryggio",
+  "scp target/armv7-unknown-linux-gnueabihf/debug/bryggio-supervisor pi_louron:~/bryggio",
+  "scp target/rbpi-nats-server pi_louron:~/bryggio/nats-server",
 ]
 
 [tasks.rbpi-install-cli]
