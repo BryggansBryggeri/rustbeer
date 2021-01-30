@@ -33,7 +33,8 @@
 mod actor;
 pub mod config;
 pub mod control;
-mod hardware;
+// TODO: Make private
+pub mod hardware;
 mod logger;
 pub mod pub_sub;
 pub mod sensor;

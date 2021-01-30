@@ -1,4 +1,6 @@
 #[cfg(target_arch = "x86_64")]
-pub(crate) mod dummy;
+pub mod dummy;
+// pub(crate) mod dummy;
 #[cfg(target_arch = "arm")]
-pub(crate) mod rbpi;
+pub mod rbpi;
+// pub(crate) mod rbpi;
